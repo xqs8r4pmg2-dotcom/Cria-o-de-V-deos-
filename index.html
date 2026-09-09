@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Effects Studio</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #111827; color: #f9fafb;
+  }
+  .app { max-width: 1200px; margin: auto; padding: 18px; }
+  header {
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    margin-bottom:16px;
+  }
+  h1 { margin:0; font-size:clamp(22px,4vw,34px); }
+  .sub { color:#9ca3af; margin-top:4px; font-size:14px; }
+  .grid { display:grid; grid-template-columns: 330px 1fr; gap:16px; }
+  .panel, .preview {
+    background:#1f2937; border:1px solid #374151; border-radius:16px; padding:16px;
+  }
+  label { display:block; font-size:13px; color:#d1d5db; margin:12px 0 6px; }
+  input, select, button {
+    width:100%; border:1px solid #4b5563; border-radius:10px; padding:10px;
+    background:#111827; color:#fff; font:inherit;
+  }
+  button { cursor:pointer; background:#2563eb; border-color:#2563eb; font-weight:700; }
+  button.secondary { background:#374151; border-color:#4b5563; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .actions { display:grid; gap:8px; margin-top:14px; }
+  .drop {
+    border:2px dashed #4b5563; border-radius:12px; padding:18px 10px; text-align:center;
+    color:#9ca3af; cursor:pointer;
+  }
+  .drop.drag { border-color:#60a5fa; background:#172554; }
+  #fileInput { display:none; }
+  .thumbs { display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; margin-top:12px; }
+  .thumb {
+    position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; border:2px solid transparent;
+    background:#111827; cursor:pointer;
+  }
+  .thumb.active { border-color:#60a5fa; }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .num { position:absolute; top:4px; left:4px; background:#000b; border-radius:6px; padding:2px 5px; font-size:11px; }
+  .preview { display:flex; flex-direction:column; align-items:center; }
+  .stage {
+    width:min(100%, 900px); aspect-ratio:16/9; background:#000; border-radius:12px;
+    overflow:hidden; position:relative; display:flex; align-items:center; justify-content:center;
+  }
+  canvas { width:100%; height:100%; display:block; }
+  .status { width:100%; max-width:900px; margin-top:10px; color:#9ca3af; font-size:13px; }
+  progress { width:100%; height:10px; }
+  .hint { color:#9ca3af; font-size:12px; line-height:1.45; margin-top:12px; }
+  .badge { padding:7px 10px; border-radius:999px; background:#064e3b; color:#a7f3d0; font-size:12px; }
+  @media(max-width:800px){ .grid{grid-template-columns:1fr;} header{align-items:flex-start; flex-direction:column;} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>🎬 Image Effects Studio</h1>
+      <div class="sub">Slideshow com zoom, fade, slide e rotação — tudo em um único HTML.</div>
+    </div>
+    <div class="badge">Processamento local</div>
+  </header>
+
+  <div class="grid">
+    <section class="panel">
+      <div id="drop" class="drop">
+        <strong>📁 Adicionar imagens</strong><br>
+        Arraste aqui ou toque para selecionar
+        <input id="fileInput" type="file" accept="image/*" multiple>
+      </div>
+
+      <div id="thumbs" class="thumbs"></div>
+
+      <label for="duration">Duração de cada imagem (segundos)</label>
+      <input id="duration" type="number" min="0.5" max="30" step="0.5" value="3">
+
+      <label for="transition">Transição</label>
+      <select id="transition">
+        <option value="fade">Fade / Dissolve</option>
+        <option value="slide">Slide</option>
+        <option value="zoom">Zoom</option>
+        <option value="none">Corte direto</option>
+      </select>
+
+      <label for="effect">Efeito da imagem</label>
+      <select id="effect">
+        <option value="kenburns">Ken Burns (zoom + movimento)</option>
+        <option value="zoomIn">Zoom lento</option>
+        <option value="zoomOut">Zoom afastando</option>
+        <option value="pan">Movimento lateral</option>
+        <option value="rotate">Rotação suave</option>
+        <option value="none">Sem efeito</option>
+      </select>
+
+      <div class="row">
+        <div>
+          <label for="fps">FPS</label>
+          <select id="fps">
+            <option>24</option>
+            <option selected>30</option>
+            <option>60</option>
+          </select>
+        </div>
+        <div>
+          <label for="aspect">Formato</label>
+          <select id="aspect">
+            <option value="16:9" selected>16:9</option>
+            <option value="9:16">9:16</option>
+            <option value="1:1">1:1</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="previewBtn" disabled>▶ Pré-visualizar</button>
+        <button id="stopBtn" class="secondary" disabled>■ Parar</button>
+        <button id="exportBtn" disabled>🎥 Exportar vídeo</button>
+      </div>
+
+      <div class="hint">
+        <b>Observação:</b> esta primeira versão exporta no formato suportado pelo
+        navegador. O botão de exportação escolhe automaticamente um MIME compatível
+        (normalmente WebM). Para MP4 H.264/AAC universal, a próxima versão pode integrar
+        FFmpeg/WebAssembly.
+      </div>
+    </section>
+
+    <section class="preview">
+      <div class="stage">
+        <canvas id="canvas"></canvas>
+      </div>
+      <div class="status" id="status">Adicione imagens para começar.</div>
+      <progress id="progress" value="0" max="1"></progress>
+    </section>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const input = $("fileInput"), drop = $("drop"), thumbs = $("thumbs");
+  const canvas = $("canvas"), ctx = canvas.getContext("2d");
+  const previewBtn = $("previewBtn"), stopBtn = $("stopBtn"), exportBtn = $("exportBtn");
+  const status = $("status"), progress = $("progress");
+  const durationInput = $("duration"), transitionInput = $("transition");
+  const effectInput = $("effect"), fpsInput = $("fps"), aspectInput = $("aspect");
+
+  let images = [];
+  let selected = 0;
+  let playing = false;
+  let raf = null;
+  let recorder = null;
+  let recordedChunks = [];
+
+  function setCanvasSize() {
+    const a = aspectInput.value;
+    if (a === "9:16") { canvas.width = 1080; canvas.height = 1920; }
+    else if (a === "1:1") { canvas.width = 1080; canvas.height = 1080; }
+    else { canvas.width = 1920; canvas.height = 1080; }
+    drawFrame(0, selected);
+  }
+
+  function fitCover(img, W, H, scale=1) {
+    const s = Math.max(W/img.width, H/img.height) * scale;
+    const w = img.width*s, h = img.height*s;
+    return {w,h,x:(W-w)/2,y:(H-h)/2};
+  }
+
+  function drawImage(img, t, effect, alpha=1, slideX=0) {
+    const W=canvas.width, H=canvas.height;
+    ctx.save(); ctx.globalAlpha=alpha;
+    let z=1, dx=0, dy=0, rot=0;
+    if (effect==="zoomIn") z=1+0.10*t;
+    else if (effect==="zoomOut") z=1.10-0.10*t;
+    else if (effect==="pan") { z=1.08; dx=(t-.5)*W*.12; }
+    else if (effect==="rotate") { z=1.04; rot=(t-.5)*0.025; }
+    else if (effect==="kenburns") {
+      z=1.02+0.10*t; dx=(t-.5)*W*.08; dy=(.5-t)*H*.04;
+    }
+    const r=fitCover(img,W,H,z);
+    ctx.translate(W/2+dx+slideX,H/2+dy);
+    ctx.rotate(rot);
+    ctx.drawImage(img,-r.w/2,-r.h/2,r.w,r.h);
+    ctx.restore();
+  }
+
+  function drawFrame(t, index=selected, nextIndex=null, trans=0) {
+    ctx.fillStyle="#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
+    if (!images.length) return;
+    const img=images[index];
+    const tr=transitionInput.value;
+    if (nextIndex !== null && trans>0 && tr==="fade") {
+      drawImage(img,t,effectInput.value,1-trans);
+      drawImage(images[nextIndex],0,effectInput.value,trans);
+    } else if (nextIndex !== null && trans>0 && tr==="slide") {
+      const W=canvas.width;
+      drawImage(img,t,effectInput.value,1, -trans*W);
+      drawImage(images[nextIndex],0,effectInput.value,1,(1-trans)*W);
+    } else if (nextIndex !== null && trans>0 && tr==="zoom") {
+      drawImage(img,t,effectInput.value,1-trans*.2);
+      ctx.globalAlpha=trans; drawImage(images[nextIndex],0,effectInput.value,trans);
+    } else {
+      drawImage(img,t,effectInput.value,1);
+    }
+  }
+
+  function renderThumbs() {
+    thumbs.innerHTML="";
+    images.forEach((img,i)=>{
+      const d=document.createElement("div"); d.className="thumb"+(i===selected?" active":"");
+      d.innerHTML=`<img src="${img.src}" alt="Imagem ${i+1}"><span class="num">${i+1}</span>`;
+      d.onclick=()=>{selected=i; renderThumbs(); drawFrame(0,i); status.textContent=`Imagem ${i+1} de ${images.length}`;};
+      thumbs.appendChild(d);
+    });
+    const enabled=images.length>0;
+    previewBtn.disabled=!enabled; exportBtn.disabled=!enabled;
+  }
+
+  async function addFiles(fileList) {
+    const files=[...fileList].filter(f=>f.type.startsWith("image/"));
+    for(const file of files){
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.src=url;
+      await img.decode();
+      images.push({img,src:url,name:file.name});
+    }
+    renderThumbs(); setCanvasSize();
+    status.textContent=`${images.length} imagem(ns) carregada(s).`;
+  }
+
+  drop.onclick=()=>input.click();
+  input.onchange=e=>addFiles(e.target.files);
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+  drop.addEventListener("drop",e=>addFiles(e.dataTransfer.files));
+  aspectInput.onchange=setCanvasSize;
+
+  function stop() {
+    playing=false;
+    if(raf) cancelAnimationFrame(raf);
+    stopBtn.disabled=true;
+    previewBtn.disabled=images.length===0;
+    exportBtn.disabled=images.length===0;
+  }
+
+  function animate(startTime, exporting=false) {
+    const dur=Number(durationInput.value)*1000;
+    const transMs=Math.min(700,dur*.25);
+    const total=images.length*dur;
+    function frame(now) {
+      if(!playing) return;
+      const elapsed=now-startTime;
+      if(elapsed>=total){
+        drawFrame(1,images.length-1);
+        if(exporting) finishRecording();
+        else stop();
+        return;
+      }
+      const absoluteIndex=Math.min(images.length-1,Math.floor(elapsed/dur));
+      const local=elapsed%dur;
+      const t=Math.min(1,local/dur);
+      let next=null, tr=0;
+      if(absoluteIndex<images.length-1 && local>=dur-transMs){
+        next=absoluteIndex+1; tr=(local-(dur-transMs))/transMs;
+      }
+      drawFrame(t,absoluteIndex,next,tr);
+      progress.value=elapsed/total;
+      status.textContent=`Imagem ${absoluteIndex+1}/${images.length} · ${Math.round(elapsed/1000)}s`;
+      raf=requestAnimationFrame(frame);
+    }
+    raf=requestAnimationFrame(frame);
+  }
+
+  previewBtn.onclick=()=>{
+    if(!images.length)return;
+    stop(); playing=true; stopBtn.disabled=false; previewBtn.disabled=true; exportBtn.disabled=true;
+    progress.value=0; animate(performance.now(),false);
+  };
+  stopBtn.onclick=stop;
+
+  function supportedMime() {
+    const list=[
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm"
+    ];
+    return list.find(m=>MediaRecorder.isTypeSupported(m)) || "";
+  }
+
+  async function finishRecording() {
+    if(recorder && recorder.state!=="inactive") recorder.stop();
+  }
+
+  exportBtn.onclick=()=>{
+    if(!images.length || !window.MediaRecorder){
+      alert("Este navegador não oferece MediaRecorder.");
+      return;
+    }
+    stop();
+    const mime=supportedMime();
+    if(!mime){ alert("Este navegador não possui um formato de gravação compatível."); return; }
+
+    const stream=canvas.captureStream(Number(fpsInput.value));
+    recordedChunks=[];
+    recorder=new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:8_000_000});
+    recorder.ondataavailable=e=>{if(e.data.size) recordedChunks.push(e.data);};
+    recorder.onstop=()=>{
+      const blob=new Blob(recordedChunks,{type:mime});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url; a.download="slideshow."+(mime.includes("webm")?"webm":"mp4");
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(url),5000);
+      playing=false; stopBtn.disabled=true; previewBtn.disabled=false; exportBtn.disabled=false;
+      progress.value=1; status.textContent="Vídeo exportado. Verifique a pasta Downloads/Arquivos.";
+    };
+    recorder.start(250);
+    playing=true; stopBtn.disabled=false; previewBtn.disabled=true; exportBtn.disabled=true;
+    progress.value=0;
+    animate(performance.now(),true);
+  };
+
+  // Initial canvas
+  setCanvasSize();
+})();
+</script>
+</body>
+</html>
