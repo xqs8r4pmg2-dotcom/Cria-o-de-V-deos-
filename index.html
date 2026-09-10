@@ -96,9 +96,31 @@
         <option value="zoomIn">Zoom lento</option>
         <option value="zoomOut">Zoom afastando</option>
         <option value="pan">Movimento lateral</option>
+        <option value="panLeft">Pan para a esquerda</option>
+        <option value="panRight">Pan para a direita</option>
+        <option value="diagonal">Diagonal (canto a canto)</option>
+        <option value="zoomPulse">Pulso de zoom</option>
         <option value="rotate">Rotação suave</option>
+        <option value="tiltIn">Inclinação 3D sutil</option>
+        <option value="blurReveal">Revelar do desfoque</option>
         <option value="none">Sem efeito</option>
       </select>
+
+      <label for="fit">Enquadramento</label>
+      <select id="fit">
+        <option value="cover" selected>Cobrir (preenche o quadro, pode cortar bordas)</option>
+        <option value="contain">Conter (mostra a foto inteira, com fundo desfocado)</option>
+      </select>
+
+      <label for="focus">Foco vertical (no modo Cobrir)</label>
+      <select id="focus">
+        <option value="0.5" selected>Centro</option>
+        <option value="0">Topo — evita cortar cabeça/rosto</option>
+        <option value="1">Base</option>
+      </select>
+
+      <label for="intensity">Intensidade do efeito: <span id="intensityVal">100%</span></label>
+      <input id="intensity" type="range" min="0" max="150" step="5" value="100">
 
       <div class="row">
         <div>
@@ -126,6 +148,10 @@
       </div>
 
       <div class="hint">
+        <b>Cortando fotos?</b> Troque "Enquadramento" para <i>Conter</i> (mostra a imagem
+        inteira, sem cortes) ou ajuste o "Foco vertical" para <i>Topo</i> se o corte está
+        pegando cabeças/rostos. Reduza a "Intensidade do efeito" se o zoom estiver
+        cortando demais.<br><br>
         <b>Observação:</b> esta primeira versão exporta no formato suportado pelo
         navegador. O botão de exportação escolhe automaticamente um MIME compatível
         (normalmente WebM). Para MP4 H.264/AAC universal, a próxima versão pode integrar
@@ -153,6 +179,8 @@
   const status = $("status"), progress = $("progress");
   const durationInput = $("duration"), transitionInput = $("transition");
   const effectInput = $("effect"), fpsInput = $("fps"), aspectInput = $("aspect");
+  const fitInput = $("fit"), focusInput = $("focus");
+  const intensityInput = $("intensity"), intensityVal = $("intensityVal");
 
   let images = [];
   let selected = 0;
@@ -172,26 +200,62 @@
     drawFrame(0, selected);
   }
 
-  function fitCover(img, W, H, scale=1) {
-    const s = Math.max(W/img.width, H/img.height) * scale;
-    const w = img.width*s, h = img.height*s;
-    return {w,h,x:(W-w)/2,y:(H-h)/2};
+  intensityInput.oninput = () => { intensityVal.textContent = intensityInput.value + "%"; drawFrame(0, selected); };
+  fitInput.onchange = () => drawFrame(0, selected);
+  focusInput.onchange = () => drawFrame(0, selected);
+
+  // mode "cover"   -> preenche o quadro todo, cortando o que sobrar (comportamento antigo)
+  // mode "contain" -> encolhe a foto até caber inteira, sem cortar nada
+  function computeFit(img, W, H, scale, mode) {
+    const s = mode==="contain"
+      ? Math.min(W/img.width, H/img.height) * scale
+      : Math.max(W/img.width, H/img.height) * scale;
+    return { w: img.width*s, h: img.height*s };
   }
 
   function drawImage(img, t, effect, alpha=1, slideX=0) {
     const W=canvas.width, H=canvas.height;
+    const intensity = Number(intensityInput.value)/100;
+    const fitMode = fitInput.value;
+    const focusT = Number(focusInput.value);
+
+    let z=1, dx=0, dy=0, rot=0, skew=0, blurPx=0;
+    if (effect==="zoomIn") { z=1+0.10*t*intensity; }
+    else if (effect==="zoomOut") { z=1+0.10*intensity-0.10*t*intensity; }
+    else if (effect==="pan") { z=1+0.08*intensity; dx=(t-.5)*W*.12*intensity; }
+    else if (effect==="panLeft") { z=1+0.14*intensity; dx=(0.5-t)*W*.12*intensity; }
+    else if (effect==="panRight") { z=1+0.14*intensity; dx=(t-0.5)*W*.12*intensity; }
+    else if (effect==="diagonal") { z=1+0.04*intensity+0.10*t*intensity; dx=(t-.5)*W*.09*intensity; dy=(t-.5)*H*.09*intensity; }
+    else if (effect==="zoomPulse") { z=1+0.06*Math.sin(t*Math.PI)*intensity; }
+    else if (effect==="rotate") { z=1+0.04*intensity; rot=(t-.5)*0.025*intensity; }
+    else if (effect==="tiltIn") { z=1+0.04*intensity; skew=(1-t)*0.06*intensity; }
+    else if (effect==="blurReveal") { z=1+0.05*intensity; blurPx=(1-t)*10*intensity; }
+    else if (effect==="kenburns") { z=1+0.02*intensity+0.10*t*intensity; dx=(t-.5)*W*.08*intensity; dy=(.5-t)*H*.04*intensity; }
+
+    const r=computeFit(img,W,H,z,fitMode);
+    // Deslocamento vertical do "foco": 0 = topo, 0.5 = centro, 1 = base.
+    // Só faz sentido no modo Cobrir, onde sobra imagem para escolher o que cortar.
+    const dyAnchor = fitMode==="contain" ? 0 : (H - r.h) * (focusT - 0.5);
+
     ctx.save(); ctx.globalAlpha=alpha;
-    let z=1, dx=0, dy=0, rot=0;
-    if (effect==="zoomIn") z=1+0.10*t;
-    else if (effect==="zoomOut") z=1.10-0.10*t;
-    else if (effect==="pan") { z=1.08; dx=(t-.5)*W*.12; }
-    else if (effect==="rotate") { z=1.04; rot=(t-.5)*0.025; }
-    else if (effect==="kenburns") {
-      z=1.02+0.10*t; dx=(t-.5)*W*.08; dy=(.5-t)*H*.04;
+
+    // No modo Conter, nada é cortado — então preenchemos o fundo com a
+    // própria foto, desfocada e escurecida, para não sobrar tarja preta.
+    if (fitMode==="contain") {
+      ctx.save();
+      ctx.filter="blur(30px) brightness(.55)";
+      const bg=computeFit(img,W,H,z*1.15,"cover");
+      ctx.translate(W/2+dx+slideX,H/2+dy);
+      if (rot) ctx.rotate(rot);
+      if (skew) ctx.transform(1,0,skew,1,0,0);
+      ctx.drawImage(img,-bg.w/2,-bg.h/2,bg.w,bg.h);
+      ctx.restore();
     }
-    const r=fitCover(img,W,H,z);
-    ctx.translate(W/2+dx+slideX,H/2+dy);
-    ctx.rotate(rot);
+
+    if (blurPx>0.5) ctx.filter=`blur(${blurPx}px)`;
+    ctx.translate(W/2+dx+slideX,H/2+dy+dyAnchor);
+    if (rot) ctx.rotate(rot);
+    if (skew) ctx.transform(1,0,skew,1,0,0);
     ctx.drawImage(img,-r.w/2,-r.h/2,r.w,r.h);
     ctx.restore();
   }
